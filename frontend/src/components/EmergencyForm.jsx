@@ -35,7 +35,7 @@ export default function EmergencyForm({ onSubmit, loading, onLocationDetected })
         setLocationError('Using Chennai demo location');
         setLocating(false);
       },
-      { timeout: 8000 }
+      { timeout: 15000, enableHighAccuracy: true, maximumAge: 0 }
     );
   };
 
