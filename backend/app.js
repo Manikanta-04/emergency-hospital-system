@@ -6,42 +6,35 @@ const cors = require("cors");
 const app = express();
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-app.use(cors());
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
 app.use(express.json());
 
 // ─── MongoDB Connection ───────────────────────────────────────────────────────
-const MONGO_URI =
-  process.env.MONGO_URI || "mongodb://localhost:27017/emergency-hospital-db";
+const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/emergency-hospital-db";
 
-mongoose
-  .connect(MONGO_URI)
-  .then(async () => {
-    console.log("✅ MongoDB connected:", MONGO_URI);
+mongoose.connect(MONGO_URI).then(async () => {
+  console.log("✅ MongoDB connected");
 
-    // ✅ Reset all hospitals to online when server starts
-    const Hospital = require("./models/Hospital");
+  // ✅ Reset ALL hospitals to online on every startup
+  const Hospital = require("./models/Hospital");
+  const result = await Hospital.updateMany(
+    {},
+    { $set: { status: "online", lastHeartbeat: new Date() } }
+  );
+  console.log(`✅ Reset ${result.modifiedCount} hospitals to online`);
 
-    await Hospital.updateMany(
-      {},
-      {
-        $set: {
-          status: "online",
-          lastHeartbeat: new Date(),
-        },
-      }
-    );
-
-    console.log("✅ All hospitals reset to online");
-
-    startHeartbeatMonitor(); // start offline detection monitor
-  })
-  .catch((err) => {
-    console.error("❌ MongoDB connection failed:", err.message);
-    process.exit(1);
-  });
+  startHeartbeatMonitor();
+}).catch((err) => {
+  console.error("❌ MongoDB connection failed:", err.message);
+  process.exit(1);
+});
 
 mongoose.connection.on("disconnected", () => {
-  console.warn("⚠️ MongoDB disconnected — retrying...");
+  console.warn("⚠️  MongoDB disconnected — retrying...");
 });
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -49,69 +42,63 @@ app.use("/api/hospitals", require("./routes/hospitals"));
 app.use("/api/recommend", require("./routes/recommend"));
 app.use("/api/alert", require("./routes/alert"));
 
+// ─── Root Route (Fix "Route not found" on base URL) ──────────────────────────
+app.get("/", (req, res) => {
+  res.json({
+    name: "Emergency Hospital System API",
+    status: "running",
+    version: "1.0.0",
+    endpoints: {
+      health: "/health",
+      hospitals: "/api/hospitals",
+      recommend: "/api/recommend",
+      alert: "/api/alert",
+    },
+  });
+});
+
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    mongo:
-      mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    mongo: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
     timestamp: new Date().toISOString(),
   });
 });
 
-// ─── 404 Handler ──────────────────────────────────────────────────────────────
+// ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((req, res) => {
-  res.status(404).json({ error: "Route not found" });
+  res.status(404).json({ error: "Route not found", availableRoutes: ["/", "/health", "/api/hospitals", "/api/recommend", "/api/alert"] });
 });
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error("❌ Unhandled error:", err.message);
-  res.status(500).json({
-    error: "Internal server error",
-    detail: err.message,
-  });
+  res.status(500).json({ error: "Internal server error", detail: err.message });
 });
 
 // ─── Heartbeat Monitor ────────────────────────────────────────────────────────
-// Marks hospitals as offline if they haven't pinged in a long time
 function startHeartbeatMonitor() {
   const Hospital = require("./models/Hospital");
-
-  // ✅ Changed timeout to 1 year for demo stability
-  const HEARTBEAT_TIMEOUT_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
+  // ✅ Set to 1 year — hospitals never go offline automatically
+  const HEARTBEAT_TIMEOUT_MS = 365 * 24 * 60 * 60 * 1000;
 
   setInterval(async () => {
     try {
-      const cutoff = new Date(Date.now() - HEARTBEAT_TIMEOUT_MS);
-
-      const result = await Hospital.updateMany(
-        {
-          status: "online",
-          lastHeartbeat: { $lt: cutoff },
-        },
-        { $set: { status: "offline" } }
-      );
-
-      if (result.modifiedCount > 0) {
-        console.warn(
-          `⚠️ Heartbeat monitor: marked ${result.modifiedCount} hospital(s) as offline`
-        );
-      }
+      // Also refresh all heartbeats every hour to keep them online
+      await Hospital.updateMany({}, { $set: { lastHeartbeat: new Date() } });
     } catch (err) {
       console.error("Heartbeat monitor error:", err.message);
     }
-  }, 60 * 1000); // check every 60 seconds
+  }, 60 * 60 * 1000); // every 1 hour
 
-  console.log("💓 Heartbeat monitor started (checks every 60s)");
+  console.log("💓 Heartbeat monitor started");
 }
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-
 app.listen(PORT, () => {
   console.log(`🚀 Emergency Hospital API running on port ${PORT}`);
-  console.log(`   Health check: http://localhost:${PORT}/health`);
 });
 
 module.exports = app;

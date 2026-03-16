@@ -1,5 +1,30 @@
 import { useEffect, useRef } from 'react';
 
+// Inject blink animations into document head once
+const BLINK_STYLE = `
+  @keyframes blink-dot {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+  @keyframes blink-ring {
+    0% { transform: translate(-50%,-50%) scale(1); opacity: 0.6; }
+    100% { transform: translate(-50%,-50%) scale(2.5); opacity: 0; }
+  }
+  @keyframes ripple-blue {
+    0% { transform: translate(-50%,-50%) scale(1); opacity: 0.5; }
+    100% { transform: translate(-50%,-50%) scale(3); opacity: 0; }
+  }
+`;
+
+let styleInjected = false;
+function injectStyles() {
+  if (styleInjected) return;
+  const style = document.createElement('style');
+  style.textContent = BLINK_STYLE;
+  document.head.appendChild(style);
+  styleInjected = true;
+}
+
 export default function HospitalMap({ hospitals, recommendation, userLocation, showRoute }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -8,6 +33,7 @@ export default function HospitalMap({ hospitals, recommendation, userLocation, s
   const ambulanceMarkerRef = useRef(null);
 
   useEffect(() => {
+    injectStyles();
     if (mapInstanceRef.current) return;
     import('leaflet').then((L) => {
       const lat = userLocation?.lat || 16.5193;
@@ -46,8 +72,9 @@ export default function HospitalMap({ hospitals, recommendation, userLocation, s
     const recId = recommendation?.hospitalId;
     const recHospital = hospitals.find(h => recId === h._id || recId === h.hospitalId);
     const others = hospitals.filter(h => recId !== h._id && recId !== h.hospitalId);
+    const hasResults = hospitals.length > 0 && recommendation;
 
-    // Cluster non-recommended hospitals
+    // Cluster non-recommended
     if (zoom < 14) {
       const radiusKm = zoom < 11 ? 8 : zoom < 12 ? 4 : zoom < 13 ? 2 : 1;
       const clusters = clusterHospitals(others, radiusKm);
@@ -67,57 +94,46 @@ export default function HospitalMap({ hospitals, recommendation, userLocation, s
       });
     }
 
-    // ✅ Best hospital — blinking red
+    // ✅ Best hospital — always blinking red
     if (recHospital) {
       const m = makeMarker(L, recHospital, true, recommendation);
       if (m) {
         m.addTo(map); markersRef.current.push(m);
         const lat = recHospital.location?.coordinates?.[1] || recHospital.coordinates?.lat;
         const lng = recHospital.location?.coordinates?.[0] || recHospital.coordinates?.lng;
-        if (lat && lng) {
-          // Fit map to show BOTH patient and hospital
-          if (userLocation) {
-            const bounds = L.latLngBounds(
-              [userLocation.lat, userLocation.lng],
-              [lat, lng]
-            );
-            map.fitBounds(bounds, { padding: [80, 80] });
-          } else {
-            map.setView([lat, lng], Math.max(zoom, 14));
-          }
-          setTimeout(() => m.openPopup(), 600);
+        if (lat && lng && userLocation) {
+          const bounds = L.latLngBounds([userLocation.lat, userLocation.lng], [lat, lng]);
+          map.fitBounds(bounds, { padding: [80, 80] });
+          setTimeout(() => m.openPopup(), 800);
         }
       }
     }
 
-    // ✅ Patient location — blinking red dot
+    // ✅ User/Patient location
     if (userLocation) {
-      const isResultsView = hospitals.length > 0 && recommendation;
-
-      const icon = L.divIcon({
-        html: isResultsView ? `
-          <!-- Blinking red patient location -->
-          <div style="position:relative;width:36px;height:36px">
-            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:36px;height:36px;background:rgba(220,48,37,0.2);border-radius:50%;animation:blink-ring 1s infinite 0.3s"></div>
-            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:24px;height:24px;background:rgba(220,48,37,0.4);border-radius:50%;animation:blink-ring 1s infinite 0.15s"></div>
-            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:14px;height:14px;background:#d93025;border-radius:50%;border:2.5px solid white;box-shadow:0 2px 8px rgba(220,48,37,0.6);animation:blink-dot 1s infinite"></div>
-            <div style="position:absolute;top:-20px;left:50%;transform:translateX(-50%);background:#d93025;color:white;font-size:8px;font-weight:800;padding:2px 6px;border-radius:8px;white-space:nowrap;font-family:sans-serif">🚨 PATIENT</div>
-          </div>
-        ` : `
-          <!-- Normal blue dot before search -->
-          <div style="position:relative;width:22px;height:22px">
-            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:22px;height:22px;background:rgba(66,133,244,0.25);border-radius:50%;animation:ripple 1.8s infinite"></div>
-            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:13px;height:13px;background:#4285F4;border-radius:50%;border:2.5px solid white;box-shadow:0 2px 8px rgba(66,133,244,0.5)"></div>
-          </div>
-        `,
-        className: '',
-        iconSize: isResultsView ? [36, 36] : [22, 22],
-        iconAnchor: isResultsView ? [18, 18] : [11, 11],
-      });
+      const icon = hasResults
+        ? L.divIcon({
+            html: `
+              <div style="position:relative;width:40px;height:40px">
+                <div style="position:absolute;top:50%;left:50%;width:40px;height:40px;background:rgba(220,48,37,0.25);border-radius:50%;animation:blink-ring 1s ease-out infinite;"></div>
+                <div style="position:absolute;top:50%;left:50%;width:26px;height:26px;background:rgba(220,48,37,0.4);border-radius:50%;animation:blink-ring 1s ease-out infinite 0.2s;"></div>
+                <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:16px;height:16px;background:#d93025;border-radius:50%;border:3px solid white;box-shadow:0 0 10px rgba(220,48,37,0.8);animation:blink-dot 1s step-end infinite;"></div>
+                <div style="position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);background:#d93025;color:white;font-size:9px;font-weight:800;padding:2px 8px;border-radius:10px;white-space:nowrap;font-family:sans-serif;">🚨 PATIENT</div>
+              </div>`,
+            className: '', iconSize: [40, 40], iconAnchor: [20, 20],
+          })
+        : L.divIcon({
+            html: `
+              <div style="position:relative;width:22px;height:22px">
+                <div style="position:absolute;top:50%;left:50%;width:22px;height:22px;background:rgba(66,133,244,0.3);border-radius:50%;animation:ripple-blue 1.8s ease-out infinite;"></div>
+                <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:13px;height:13px;background:#4285F4;border-radius:50%;border:2.5px solid white;box-shadow:0 2px 8px rgba(66,133,244,0.5);"></div>
+              </div>`,
+            className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+          });
 
       markersRef.current.push(
         L.marker([userLocation.lat, userLocation.lng], { icon }).addTo(map)
-          .bindPopup(`<b style="color:#d93025;font-size:13px">${isResultsView ? '🚨 Patient Location' : '📍 Your Location'}</b>`)
+          .bindPopup(`<b style="color:#d93025">${hasResults ? '🚨 Patient Location' : '📍 Your Location'}</b>`)
       );
     }
   };
@@ -149,7 +165,7 @@ export default function HospitalMap({ hospitals, recommendation, userLocation, s
     const bg = hasAvail ? '#1a73e8' : '#d93025';
     const size = count > 50 ? 50 : count > 20 ? 42 : count > 10 ? 36 : 30;
     const icon = L.divIcon({
-      html: `<div style="width:${size}px;height:${size}px;background:${bg};border-radius:50%;border:3px solid white;box-shadow:0 2px 10px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:${count>99?10:count>9?12:14}px;font-family:sans-serif;cursor:pointer">${count}</div>`,
+      html: `<div style="width:${size}px;height:${size}px;background:${bg};border-radius:50%;border:3px solid white;box-shadow:0 2px 10px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:${count>99?10:count>9?12:14}px;font-family:sans-serif;">${count}</div>`,
       className: '', iconSize: [size,size], iconAnchor: [size/2,size/2],
     });
     const names = cluster.hospitals.slice(0,4).map(h=>h.name||'Hospital').join('<br/>• ');
@@ -168,13 +184,12 @@ export default function HospitalMap({ hospitals, recommendation, userLocation, s
 
     let markerHtml;
     if (isRec) {
-      // ✅ Best hospital — big blinking red marker
       markerHtml = `
         <div style="position:relative;width:44px;height:44px">
-          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px;background:rgba(220,48,37,0.2);border-radius:50%;animation:blink-ring 1s infinite 0.3s"></div>
-          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:30px;height:30px;background:rgba(220,48,37,0.4);border-radius:50%;animation:blink-ring 1s infinite 0.15s"></div>
-          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:20px;height:20px;background:#d93025;border-radius:50%;border:3px solid white;box-shadow:0 0 12px rgba(220,48,37,0.8);animation:blink-dot 1s infinite"></div>
-          <div style="position:absolute;top:-22px;left:50%;transform:translateX(-50%);background:#d93025;color:white;font-size:8px;font-weight:800;padding:2px 7px;border-radius:10px;white-space:nowrap;font-family:sans-serif;box-shadow:0 2px 6px rgba(0,0,0,0.2)">⭐ BEST HOSPITAL</div>
+          <div style="position:absolute;top:50%;left:50%;width:44px;height:44px;background:rgba(220,48,37,0.2);border-radius:50%;animation:blink-ring 1s ease-out infinite;"></div>
+          <div style="position:absolute;top:50%;left:50%;width:30px;height:30px;background:rgba(220,48,37,0.35);border-radius:50%;animation:blink-ring 1s ease-out infinite 0.15s;"></div>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:20px;height:20px;background:#d93025;border-radius:50%;border:3px solid white;box-shadow:0 0 14px rgba(220,48,37,0.9);animation:blink-dot 1s step-end infinite;"></div>
+          <div style="position:absolute;top:-24px;left:50%;transform:translateX(-50%);background:#d93025;color:white;font-size:9px;font-weight:800;padding:2px 8px;border-radius:10px;white-space:nowrap;font-family:sans-serif;box-shadow:0 2px 6px rgba(0,0,0,0.2);">⭐ BEST HOSPITAL</div>
         </div>`;
     } else {
       const pinColor = isFull ? '#d93025' : '#1a73e8';
@@ -201,7 +216,7 @@ export default function HospitalMap({ hospitals, recommendation, userLocation, s
     return L.marker([lat, lng], { icon }).bindPopup(`
       <div style="font-family:sans-serif;min-width:210px;line-height:1.7;font-size:13px">
         <div style="font-weight:700;color:${pinColor};font-size:14px;margin-bottom:3px">${isRec ? '⭐ ' : ''}${h.name||h.hospitalName||'Hospital'}</div>
-        <div style="color:#666;font-size:11px;margin-bottom:8px;border-bottom:1px solid #eee;padding-bottom:6px">${h.location?.address||h.address||''}</div>
+        <div style="color:#666;font-size:11px;margin-bottom:8px;border-bottom:1px solid #eee;padding-bottom:6px">${h.location?.address||h.address||h.location?.city||''}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px">
           <div>🛏 ICU Beds</div><div><b style="color:${isFull?'#d93025':'#0f9d58'}">${icuBeds} ${isFull?'(Full)':'available'}</b></div>
           <div>👨‍⚕️ Specialists</div><div style="font-size:10px">${(h.availableSpecialists||[]).join(', ')||'General'}</div>
@@ -240,7 +255,7 @@ export default function HospitalMap({ hospitals, recommendation, userLocation, s
     map.fitBounds(line.getBounds(), { padding: [90, 90] });
 
     const ambIcon = L.divIcon({
-      html: `<div style="background:white;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 2px 10px rgba(0,0,0,0.3);border:2px solid #1a73e8">🚑</div>`,
+      html: `<div style="background:white;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 2px 10px rgba(0,0,0,0.3);border:2px solid #1a73e8;">🚑</div>`,
       className: '', iconSize: [36, 36], iconAnchor: [18, 18],
     });
     const amb = L.marker(coords[0], { icon: ambIcon }).addTo(map);
@@ -255,22 +270,6 @@ export default function HospitalMap({ hospitals, recommendation, userLocation, s
 
   return (
     <div className="map-wrapper">
-      <style>{`
-        @keyframes blink-dot {
-          0%,100% { opacity:1; }
-          50% { opacity:0.2; }
-        }
-        @keyframes blink-ring {
-          0%,100% { opacity:0.5; transform:translate(-50%,-50%) scale(1); }
-          50% { opacity:0; transform:translate(-50%,-50%) scale(1.6); }
-        }
-        @keyframes ripple {
-          0% { transform:translate(-50%,-50%) scale(1); opacity:0.5; }
-          100% { transform:translate(-50%,-50%) scale(3); opacity:0; }
-        }
-        .leaflet-popup-content-wrapper { border-radius:12px!important; box-shadow:0 4px 20px rgba(0,0,0,0.15)!important; }
-        .leaflet-popup-content { margin:12px 16px!important; }
-      `}</style>
       <div ref={mapRef} className="map-container" />
     </div>
   );

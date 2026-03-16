@@ -30,7 +30,7 @@ export default function DispatcherDashboard() {
       setEmergencyData({ emergencyType, patientCount, lat, lng });
       setStep('results');
     } catch (err) {
-      if (!navigator.onLine || err.code === 'ECONNABORTED') {
+      if (!navigator.onLine) {
         setError('⚠️ Offline mode — showing cached data');
         import('../data/mockHospitals').then(({ MOCK_HOSPITALS }) => {
           setHospitals(MOCK_HOSPITALS.map((h, i) => ({ ...h, rank: i + 1, score: 90 - i * 10, etaMinutes: Math.ceil(h.distanceKm / 25 * 60) })));
