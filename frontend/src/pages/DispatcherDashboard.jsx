@@ -14,6 +14,7 @@ export default function DispatcherDashboard() {
   const [emergencyData, setEmergencyData] = useState(null);
   const [alertStatus, setAlertStatus] = useState(null);
   const [showRoute, setShowRoute] = useState(false);
+  const [ambulanceLocation, setAmbulanceLocation] = useState(null);
   const [error, setError] = useState('');
   // ✅ Fix 1: Track user location for map centering
   const [userLocation, setUserLocation] = useState(null);
@@ -133,6 +134,7 @@ export default function DispatcherDashboard() {
               recommendation={recommendation}
               emergencyType={emergencyData?.emergencyType}
               onSendAlert={handleSendAlert}
+              onAmbulanceLocation={setAmbulanceLocation}
               alertStatus={alertStatus}
             />
             <AlertStatus
@@ -158,6 +160,7 @@ export default function DispatcherDashboard() {
               recommendation={recommendation}
               userLocation={emergencyData}
               showRoute={showRoute}
+              ambulanceLocation={ambulanceLocation}
             />
           </div>
         </div>
