@@ -1,4 +1,12 @@
-export default function RecommendationPanel({ recommendation, emergencyType, onSendAlert, alertStatus }) {
+import { lazy, Suspense } from 'react';
+
+// Lazy load QR to avoid issues if qrcode.react not installed
+let AmbulanceQR = null;
+try {
+  AmbulanceQR = lazy(() => import('./AmbulanceQR'));
+} catch(e) {}
+
+export default function RecommendationPanel({ recommendation, emergencyType, onSendAlert, alertStatus, onAmbulanceLocation }) {
   if (!recommendation) return null;
 
   const { hospitalName, address, score, distanceKm, etaMinutes,
@@ -64,6 +72,16 @@ export default function RecommendationPanel({ recommendation, emergencyType, onS
         onSendAlert={onSendAlert}
         alertStatus={alertStatus}
       />
+
+      {/* ✅ QR Code for ambulance tracking — shown after alert sent */}
+      {alertStatus?.sent && AmbulanceQR && (
+        <Suspense fallback={<div style={{color:'#7a8bad',fontSize:'12px',padding:'10px'}}>Loading tracker...</div>}>
+          <AmbulanceQR
+            alertLogId={alertStatus.alertLogId}
+            onLocationUpdate={onAmbulanceLocation}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -82,7 +100,6 @@ function ScoreBar({ label, value }) {
 }
 
 function AlertButton({ hospitalId, emergencyType, etaMinutes, onSendAlert, alertStatus }) {
-  // ✅ Edge Case #3: Show status + retry button
   if (alertStatus?.sent) {
     return (
       <div className="alert-success">

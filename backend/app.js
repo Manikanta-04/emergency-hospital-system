@@ -2,15 +2,47 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const app = express();
+const server = http.createServer(app); // ✅ http server for socket.io
+
+// ─── Socket.io Setup ──────────────────────────────────────────────────────────
+const io = new Server(server, {
+  cors: { origin: "*", methods: ["GET", "POST"] }
+});
+
+// Store active ambulance locations in memory
+const ambulanceLocations = {};
+
+io.on("connection", (socket) => {
+  console.log("🔌 Client connected:", socket.id);
+
+  // ✅ Driver sends their GPS location
+  socket.on("ambulance-location", (data) => {
+    const { ambulanceId, lat, lng, speed, alertLogId } = data;
+    ambulanceLocations[ambulanceId] = { lat, lng, speed, ambulanceId, alertLogId, updatedAt: new Date() };
+    // Broadcast to ALL dispatchers and hospitals watching
+    io.emit("ambulance-update", ambulanceLocations[ambulanceId]);
+  });
+
+  // ✅ Driver stops tracking
+  socket.on("ambulance-stop", (data) => {
+    delete ambulanceLocations[data.ambulanceId];
+    io.emit("ambulance-stopped", { ambulanceId: data.ambulanceId });
+  });
+
+  socket.on("disconnect", () => {
+    console.log("🔌 Client disconnected:", socket.id);
+  });
+});
+
+// ✅ Export io so routes can use it
+app.set("io", io);
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
+app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"] }));
 app.use(express.json());
 
 // ─── MongoDB Connection ───────────────────────────────────────────────────────
@@ -18,86 +50,68 @@ const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/emergency-
 
 mongoose.connect(MONGO_URI).then(async () => {
   console.log("✅ MongoDB connected");
-
-  // ✅ Reset ALL hospitals to online on every startup
   const Hospital = require("./models/Hospital");
-  const result = await Hospital.updateMany(
-    {},
-    { $set: { status: "online", lastHeartbeat: new Date() } }
-  );
-  console.log(`✅ Reset ${result.modifiedCount} hospitals to online`);
-
+  await Hospital.updateMany({}, { $set: { status: "online", lastHeartbeat: new Date() } });
+  console.log("✅ All hospitals reset to online");
   startHeartbeatMonitor();
 }).catch((err) => {
   console.error("❌ MongoDB connection failed:", err.message);
   process.exit(1);
 });
 
-mongoose.connection.on("disconnected", () => {
-  console.warn("⚠️  MongoDB disconnected — retrying...");
-});
+mongoose.connection.on("disconnected", () => console.warn("⚠️ MongoDB disconnected"));
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/hospitals", require("./routes/hospitals"));
 app.use("/api/recommend", require("./routes/recommend"));
 app.use("/api/alert", require("./routes/alert"));
 
-// ─── Root Route (Fix "Route not found" on base URL) ──────────────────────────
+// ✅ Ambulance tracking route
+app.get("/api/tracking/:ambulanceId", (req, res) => {
+  const loc = ambulanceLocations[req.params.ambulanceId];
+  if (!loc) return res.json({ active: false, message: "Ambulance not currently tracking" });
+  res.json({ active: true, ...loc });
+});
+
+app.get("/api/tracking", (req, res) => {
+  res.json({ ambulances: Object.values(ambulanceLocations) });
+});
+
+// ─── Root & Health ────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
   res.json({
     name: "Emergency Hospital System API",
     status: "running",
     version: "1.0.0",
-    endpoints: {
-      health: "/health",
-      hospitals: "/api/hospitals",
-      recommend: "/api/recommend",
-      alert: "/api/alert",
-    },
+    features: ["hospital-routing", "ai-recommendation", "alerts", "live-tracking"],
   });
 });
 
-// ─── Health Check ─────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     mongo: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    activeAmbulances: Object.keys(ambulanceLocations).length,
     timestamp: new Date().toISOString(),
   });
 });
 
-// ─── 404 Handler ─────────────────────────────────────────────────────────────
-app.use((req, res) => {
-  res.status(404).json({ error: "Route not found", availableRoutes: ["/", "/health", "/api/hospitals", "/api/recommend", "/api/alert"] });
-});
-
-// ─── Global Error Handler ─────────────────────────────────────────────────────
-app.use((err, req, res, next) => {
-  console.error("❌ Unhandled error:", err.message);
-  res.status(500).json({ error: "Internal server error", detail: err.message });
-});
+app.use((req, res) => res.status(404).json({ error: "Route not found" }));
+app.use((err, req, res, next) => res.status(500).json({ error: err.message }));
 
 // ─── Heartbeat Monitor ────────────────────────────────────────────────────────
 function startHeartbeatMonitor() {
   const Hospital = require("./models/Hospital");
-  // ✅ Set to 1 year — hospitals never go offline automatically
-  const HEARTBEAT_TIMEOUT_MS = 365 * 24 * 60 * 60 * 1000;
-
   setInterval(async () => {
-    try {
-      // Also refresh all heartbeats every hour to keep them online
-      await Hospital.updateMany({}, { $set: { lastHeartbeat: new Date() } });
-    } catch (err) {
-      console.error("Heartbeat monitor error:", err.message);
-    }
-  }, 60 * 60 * 1000); // every 1 hour
-
+    try { await Hospital.updateMany({}, { $set: { lastHeartbeat: new Date() } }); }
+    catch (err) { console.error("Heartbeat error:", err.message); }
+  }, 60 * 60 * 1000);
   console.log("💓 Heartbeat monitor started");
 }
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {  // ✅ Use server.listen not app.listen
   console.log(`🚀 Emergency Hospital API running on port ${PORT}`);
 });
 
