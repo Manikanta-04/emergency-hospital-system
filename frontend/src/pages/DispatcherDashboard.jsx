@@ -100,7 +100,8 @@ export default function DispatcherDashboard() {
             <span className="live-dot" />
             LIVE
           </div>
-          <a href="/hospital" className="reset-btn" style={{ textDecoration: 'none' }}>
+          <a href="/analytics" className="reset-btn" style={{ textDecoration: "none" }}>📊 Analytics</a>
+          <a href="/hospital" className="reset-btn" style={{ textDecoration: "none" }}>
             🏥 Hospital View →
           </a>
           {step === 'results' && (

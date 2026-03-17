@@ -1,16 +1,28 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../services/api';
 
+// ✅ Voice Alert System
+function speakAlert(alert) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel(); // stop any current speech
+  const text = `Emergency Alert! ${alert.emergencyType} patient arriving at ${alert.hospitalName} in ${alert.eta} minutes. Required unit: ${alert.requiredUnit}. Please prepare immediately.`;
+  const msg = new SpeechSynthesisUtterance(text);
+  msg.rate = 0.95;
+  msg.pitch = 1;
+  msg.volume = 1;
+  msg.lang = 'en-IN';
+  window.speechSynthesis.speak(msg);
+}
+
 export default function HospitalDashboard() {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [newAlertFlash, setNewAlertFlash] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
   const prevCountRef = useRef(0);
-  const audioRef = useRef(null);
 
-  // Poll for new alerts every 5 seconds
   useEffect(() => {
     fetchAlerts();
     const interval = setInterval(fetchAlerts, 5000);
@@ -21,15 +33,13 @@ export default function HospitalDashboard() {
     try {
       const res = await api.get('/alert/logs?limit=20');
       const newAlerts = res.data.logs || [];
-
-      // Flash effect when new alert arrives
       if (prevCountRef.current > 0 && newAlerts.length > prevCountRef.current) {
         setNewAlertFlash(true);
         setTimeout(() => setNewAlertFlash(false), 3000);
-        // Auto-select newest alert
         setSelectedAlert(newAlerts[0]);
+        // ✅ Voice alert fires automatically
+        if (voiceEnabled) speakAlert(newAlerts[0]);
       }
-
       prevCountRef.current = newAlerts.length;
       setAlerts(newAlerts);
       setLastUpdated(new Date());
@@ -42,12 +52,9 @@ export default function HospitalDashboard() {
 
   const getUrgencyColor = (emergencyType) => {
     const map = {
-      'Stroke': '#6366f1',
-      'Heart Attack': '#ef4444',
-      'Trauma': '#f97316',
-      'Accident': '#eab308',
-      'Burns': '#dc2626',
-      'Other': '#14b8a6',
+      'Stroke': '#6366f1', 'Heart Attack': '#ef4444',
+      'Trauma': '#f97316', 'Accident': '#eab308',
+      'Burns': '#dc2626', 'Other': '#14b8a6',
     };
     return map[emergencyType] || '#3b82f6';
   };
@@ -64,7 +71,6 @@ export default function HospitalDashboard() {
 
   return (
     <div className={`hosp-dashboard ${newAlertFlash ? 'flash' : ''}`}>
-      {/* Header */}
       <header className="hosp-header">
         <div className="hosp-header-left">
           <div className="hosp-logo">🏥</div>
@@ -80,26 +86,37 @@ export default function HospitalDashboard() {
               {activeAlerts.length} ACTIVE ALERT{activeAlerts.length > 1 ? 'S' : ''}
             </div>
           )}
-          <div className="last-updated">
-            🔄 Updated {getTimeSince(lastUpdated)}
-          </div>
+          {/* ✅ Voice toggle button */}
+          <button
+            className="reset-btn"
+            onClick={() => {
+              setVoiceEnabled(!voiceEnabled);
+              if (voiceEnabled) window.speechSynthesis.cancel();
+            }}
+            style={{ background: voiceEnabled ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', borderColor: voiceEnabled ? '#22c55e' : '#ef4444' }}
+          >
+            {voiceEnabled ? '🔊 Voice ON' : '🔇 Voice OFF'}
+          </button>
+          {/* ✅ Test voice button */}
+          <button
+            className="reset-btn"
+            onClick={() => speakAlert({ emergencyType: 'Stroke', hospitalName: 'Apollo Hospital', eta: 8, requiredUnit: 'Neurology ICU' })}
+          >
+            🎙️ Test Voice
+          </button>
+          <div className="last-updated">🔄 {getTimeSince(lastUpdated)}</div>
           <a href="/" className="back-btn">← Dispatcher</a>
         </div>
       </header>
 
       {newAlertFlash && (
-        <div className="new-alert-banner">
-          🚨 NEW EMERGENCY ALERT INCOMING — PREPARE IMMEDIATELY
-        </div>
+        <div className="new-alert-banner">🚨 NEW EMERGENCY ALERT INCOMING — PREPARE IMMEDIATELY</div>
       )}
 
       <div className="hosp-layout">
-        {/* Left — Alert List */}
         <div className="hosp-left">
           {loading ? (
-            <div className="hosp-loading">
-              <span className="spinner" /> Loading alerts...
-            </div>
+            <div className="hosp-loading"><span className="spinner" /> Loading alerts...</div>
           ) : alerts.length === 0 ? (
             <div className="no-alerts">
               <div className="no-alerts-icon">✅</div>
@@ -112,14 +129,9 @@ export default function HospitalDashboard() {
                 <div className="alert-section">
                   <div className="section-label urgent">🔴 ACTIVE ({activeAlerts.length})</div>
                   {activeAlerts.map(alert => (
-                    <AlertCard
-                      key={alert._id}
-                      alert={alert}
-                      isSelected={selectedAlert?._id === alert._id}
-                      onClick={() => setSelectedAlert(alert)}
-                      urgencyColor={getUrgencyColor(alert.emergencyType)}
-                      timeSince={getTimeSince(alert.createdAt)}
-                    />
+                    <AlertCard key={alert._id} alert={alert} isSelected={selectedAlert?._id === alert._id}
+                      onClick={() => { setSelectedAlert(alert); if (voiceEnabled) speakAlert(alert); }}
+                      urgencyColor={getUrgencyColor(alert.emergencyType)} timeSince={getTimeSince(alert.createdAt)} />
                   ))}
                 </div>
               )}
@@ -127,15 +139,9 @@ export default function HospitalDashboard() {
                 <div className="alert-section">
                   <div className="section-label completed">✅ COMPLETED ({completedAlerts.length})</div>
                   {completedAlerts.map(alert => (
-                    <AlertCard
-                      key={alert._id}
-                      alert={alert}
-                      isSelected={selectedAlert?._id === alert._id}
+                    <AlertCard key={alert._id} alert={alert} isSelected={selectedAlert?._id === alert._id}
                       onClick={() => setSelectedAlert(alert)}
-                      urgencyColor={getUrgencyColor(alert.emergencyType)}
-                      timeSince={getTimeSince(alert.createdAt)}
-                      dimmed
-                    />
+                      urgencyColor={getUrgencyColor(alert.emergencyType)} timeSince={getTimeSince(alert.createdAt)} dimmed />
                   ))}
                 </div>
               )}
@@ -143,22 +149,10 @@ export default function HospitalDashboard() {
           )}
         </div>
 
-        {/* Right — Alert Detail */}
         <div className="hosp-right">
           {selectedAlert ? (
-            <AlertDetail
-              alert={selectedAlert}
-              urgencyColor={getUrgencyColor(selectedAlert.emergencyType)}
-              timeSince={getTimeSince(selectedAlert.createdAt)}
-              onMarkComplete={async () => {
-                try {
-                  await api.patch
-                    ? api.patch(`/alert/${selectedAlert.alertLogId}/complete`)
-                    : null;
-                  fetchAlerts();
-                } catch { fetchAlerts(); }
-              }}
-            />
+            <AlertDetail alert={selectedAlert} urgencyColor={getUrgencyColor(selectedAlert.emergencyType)}
+              timeSince={getTimeSince(selectedAlert.createdAt)} onSpeak={() => speakAlert(selectedAlert)} />
           ) : (
             <div className="no-selection">
               <div className="no-sel-icon">👆</div>
@@ -174,11 +168,8 @@ export default function HospitalDashboard() {
 
 function AlertCard({ alert, isSelected, onClick, urgencyColor, timeSince, dimmed }) {
   return (
-    <div
-      className={`alert-card ${isSelected ? 'selected' : ''} ${dimmed ? 'dimmed' : ''}`}
-      style={{ '--urgency': urgencyColor }}
-      onClick={onClick}
-    >
+    <div className={`alert-card ${isSelected ? 'selected' : ''} ${dimmed ? 'dimmed' : ''}`}
+      style={{ '--urgency': urgencyColor }} onClick={onClick}>
       <div className="alert-card-top">
         <div className="alert-type-badge" style={{ background: urgencyColor + '22', color: urgencyColor, border: `1px solid ${urgencyColor}44` }}>
           {alert.emergencyType}
@@ -198,23 +189,28 @@ function AlertCard({ alert, isSelected, onClick, urgencyColor, timeSince, dimmed
   );
 }
 
-function AlertDetail({ alert, urgencyColor, timeSince, onMarkComplete }) {
+function AlertDetail({ alert, urgencyColor, timeSince, onSpeak }) {
   return (
     <div className="alert-detail">
       <div className="detail-header" style={{ borderColor: urgencyColor }}>
         <div>
-          <div className="detail-type" style={{ color: urgencyColor }}>
-            🚨 {alert.emergencyType.toUpperCase()}
-          </div>
+          <div className="detail-type" style={{ color: urgencyColor }}>🚨 {alert.emergencyType.toUpperCase()}</div>
           <h2 className="detail-hospital">{alert.hospitalName}</h2>
           <p className="detail-time">Received {timeSince} · ID: {alert.alertLogId}</p>
         </div>
-        <div className="detail-eta" style={{ color: urgencyColor }}>
-          {alert.eta}<span style={{ fontSize: 14, opacity: 0.7 }}>min</span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+          <div className="detail-eta" style={{ color: urgencyColor }}>
+            {alert.eta}<span style={{ fontSize: 14, opacity: 0.7 }}>min</span>
+          </div>
+          {/* ✅ Speak this alert button */}
+          <button onClick={onSpeak} style={{
+            background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.4)',
+            color: '#60a5fa', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer',
+            fontSize: '12px', fontFamily: 'monospace', fontWeight: '700'
+          }}>🔊 Read Aloud</button>
         </div>
       </div>
 
-      {/* Key info grid */}
       <div className="detail-grid">
         <InfoBox icon="🏥" label="Required Unit" value={alert.requiredUnit} highlight={urgencyColor} />
         <InfoBox icon="👥" label="Patients" value={`${alert.patientCount} patient${alert.patientCount > 1 ? 's' : ''}`} />
@@ -224,7 +220,6 @@ function AlertDetail({ alert, urgencyColor, timeSince, onMarkComplete }) {
         <InfoBox icon="🤖" label="AI Override" value={alert.wasManualOverride ? '⚠️ Manual' : '✅ AI Pick'} />
       </div>
 
-      {/* Action checklist */}
       <div className="action-checklist">
         <h4 className="checklist-title">⚡ Preparation Checklist</h4>
         {getChecklist(alert.emergencyType, alert.requiredUnit).map((item, i) => (
@@ -232,14 +227,10 @@ function AlertDetail({ alert, urgencyColor, timeSince, onMarkComplete }) {
         ))}
       </div>
 
-      {/* Map link */}
       {alert.patientLocation && (
-        <a
-          className="map-link"
+        <a className="map-link"
           href={`https://maps.google.com/?q=${alert.patientLocation.lat},${alert.patientLocation.lng}`}
-          target="_blank"
-          rel="noreferrer"
-        >
+          target="_blank" rel="noreferrer">
           🗺️ Open Patient Location in Google Maps
         </a>
       )}
