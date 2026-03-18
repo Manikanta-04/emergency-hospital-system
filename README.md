@@ -308,8 +308,9 @@ This project is licensed under the MIT License.
 
 <div align="center">
 
-Built with ❤️ for smarter emergency response
+Built with ❤️ for smarter emergency response  
 
-**[🌐 Try Live Demo](https://emergency-hospital-system.vercel.app)**
+[![Live Demo](https://img.shields.io/badge/Live-Demo-green?style=for-the-badge)](https://emergency-hospital-system.vercel.app)  
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Profile-blue?style=for-the-badge&logo=linkedin)](https://www.linkedin.com/in/manikanta-naripeddi-4326232a5/)
 
 </div>
