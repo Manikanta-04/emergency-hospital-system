@@ -55,6 +55,8 @@ Current emergency dispatch systems suffer from:
 - 🐢 No real-time visibility into hospital bed or specialist availability
 - 🗺️ Routing to the *nearest* hospital — not the *best* one for the emergency type
 - 📉 Zero pre-arrival communication — hospital staff aren't prepared when the patient arrives
+- 🔇 Silent alerts — no voice announcements for hands-busy hospital staff
+- 📊 No analytics — no way to review response times or dispatch history
 - ❌ Manual, phone-based coordination that breaks down under pressure
 
 **Every minute of delay in a stroke or cardiac emergency increases irreversible damage.** India's emergency infrastructure needs an intelligent, automated dispatch layer.
@@ -63,7 +65,7 @@ Current emergency dispatch systems suffer from:
 
 ## 💡 Solution
 
-The **Emergency Hospital Availability System** is an AI-driven dispatch platform that routes ambulances to the *optimal* hospital — factoring in distance, specialist availability, and real-time bed count — and automatically alerts hospital staff before the patient arrives.
+The **Emergency Hospital Availability System** is an AI-driven dispatch platform that routes ambulances to the *optimal* hospital — factoring in distance, specialist availability, and real-time bed count — and automatically alerts hospital staff via email, voice, and live map tracking before the patient arrives.
 
 > *"Don't route to the nearest hospital. Route to the right hospital."*
 
@@ -79,6 +81,10 @@ The **Emergency Hospital Availability System** is an AI-driven dispatch platform
 |---|---|
 | ![AI Score](screenshots/ai-score.png) | ![Hospital Alert](screenshots/hospital-alert.png) |
 
+| Voice Alert System | Analytics Dashboard |
+|---|---|
+| ![Voice Alert](screenshots/voice-alert.png) | ![Analytics](screenshots/analytics.png) |
+
 > 📌 *(Replace with actual screenshots from your deployed app)*
 
 ---
@@ -89,15 +95,15 @@ The **Emergency Hospital Availability System** is an AI-driven dispatch platform
 ┌──────────────────────────────────────────────────────────┐
 │                      CLIENT LAYER                         │
 │     React 18 + Vite + Leaflet.js + Axios                  │
-│     Dispatcher Dashboard  |  Hospital Dashboard           │
+│  Dispatcher Dashboard | Hospital Dashboard | Analytics    │
 │              Hosted on Vercel CDN                         │
 └───────────────────────────┬──────────────────────────────┘
-                            │  REST API calls
+                            │  REST API + Socket.io
                             ▼
 ┌──────────────────────────────────────────────────────────┐
 │                  APPLICATION LAYER                        │
-│           Node.js + Express.js                            │
-│     AI Scoring Engine | Alert Dispatch | Hospital API     │
+│           Node.js + Express.js + Socket.io                │
+│  AI Scoring | Alert Dispatch | Live GPS | Analytics API   │
 │              Hosted on Render                             │
 └──────────┬────────────────────────────┬──────────────────┘
            │  MongoDB Atlas             │  Webhook
@@ -106,13 +112,21 @@ The **Emergency Hospital Availability System** is an AI-driven dispatch platform
 │  MongoDB Atlas   │       │         n8n Cloud              │
 │  Hospital Data   │       │  Webhook → Gmail Node          │
 │  Alert Logs      │       │  Auto-email to hospital staff  │
-└──────────────────┘       └───────────────────────────────┘
+│  Analytics Data  │       └───────────────────────────────┘
+└──────────────────┘
            │
            ▼
 ┌──────────────────────────────────────────────────────────┐
-│                   MAPS & ROUTING LAYER                    │
+│              MAPS, ROUTING & TRACKING LAYER               │
 │  Leaflet.js + OpenStreetMap + OSRM + Overpass API         │
-│  Real road routing | Ambulance animation | 1234+ hospitals│
+│  Real road routing | Live 🚑 GPS via Socket.io            │
+│  Separate ambulanceMarkerRef + hospitalMarkerRef          │
+└──────────────────────────────────────────────────────────┘
+           │
+           ▼
+┌──────────────────────────────────────────────────────────┐
+│                  NOTIFICATION LAYER                       │
+│  EmailJS (Email) + Web Push API + Web Speech API (Voice)  │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -124,12 +138,16 @@ The **Emergency Hospital Availability System** is an AI-driven dispatch platform
 |---|---|---|
 | **Frontend** | React 18, Vite | UI components & state management |
 | **Maps** | Leaflet.js, OpenStreetMap | Interactive map with hospital markers |
-| **Routing** | OSRM | Real road routing + ambulance animation |
-| **Hospital Data** | Overpass API | 1234+ real hospital locations |
+| **Routing** | OSRM | Real road routing |
+| **Live Tracking** | Socket.io + `navigator.geolocation` | Real-time ambulance GPS on map |
+| **Hospital Data** | Overpass API | 1,234+ real hospital locations |
 | **HTTP Client** | Axios | API communication |
 | **Backend** | Node.js, Express.js | REST API server |
-| **Database** | MongoDB Atlas | Hospital data + alert logs |
+| **Real-time** | Socket.io | Live ambulance location streaming |
+| **Database** | MongoDB Atlas | Hospital data, alert logs, analytics |
 | **Automation** | n8n Cloud | Webhook → Gmail email alerts |
+| **Voice Alerts** | Web Speech API | Browser-native voice announcements |
+| **Analytics** | Custom Dashboard | Dispatch history, response times, trends |
 | **Frontend Deploy** | Vercel | CDN-hosted React app |
 | **Backend Deploy** | Render | Node.js API hosting |
 
@@ -142,10 +160,21 @@ The **Emergency Hospital Availability System** is an AI-driven dispatch platform
 - Handles tiebreakers via total bed count
 - Example: Apollo (Neurology on duty, 3.2km, 8 ICU beds) → **100/100** beats Rajiv Gandhi (ICU full, 0.6km) → **76/100**
 
-### 🗺️ Real-Time Map & Routing
+### 🗺️ Real-Time Map & Live Ambulance Tracking
 - Interactive Leaflet.js map with live hospital markers
-- OSRM-powered real road routing with **animated ambulance navigation**
-- Shelter and evacuation overlays, clustered markers with drill-down
+- **Live 🚑 GPS tracking** — ambulance driver's real coordinates streamed every 5 seconds via Socket.io
+- Separate `ambulanceMarkerRef` and `hospitalMarkerRef` — smooth `marker.setLatLng()` updates, no flicker
+- `ambulanceLocation` state passed from dashboard down to `HospitalMap` prop
+
+### 🔊 Voice Alert System
+- Hospital staff receive **spoken voice announcements** on incoming alerts using the Web Speech API
+- Hands-free notification — critical for busy OR and ICU environments
+- Announces emergency type, ETA, and patient count automatically
+
+### 📊 Analytics Dashboard
+- Full dispatch history with timestamps, hospital names, emergency types, and response times
+- Visual charts for alert trends, top-dispatched hospitals, and peak hours
+- Exportable data for authority reporting and performance review
 
 ### 🚨 Automated Hospital Alerting
 - Dispatcher clicks "Send Alert & Navigate" — n8n sends **automatic email** to hospital staff
@@ -159,7 +188,7 @@ The **Emergency Hospital Availability System** is an AI-driven dispatch platform
 
 ### 🏥 Dual Dashboards
 - **Dispatcher view** — select emergency type, view ranked hospitals, dispatch ambulance
-- **Hospital view** — receive real-time alerts, view incoming patient details and ETA
+- **Hospital view** — receive real-time alerts, view live ambulance on map, hear voice announcement
 
 ### 🛡️ Robust Edge Case Handling
 - Auto-expands search radius if no hospitals found (10km → 25km → 60km)
@@ -202,11 +231,17 @@ Dispatcher Request Flow:
               │
               ├── POST /api/alert  →  Alert stored in MongoDB
               ├── n8n Webhook triggered  →  Gmail sends email to hospital
-              ├── OSRM draws real road route
-              └── Animated 🚑 navigates on map
+              ├── Web Speech API fires  →  Voice alert announced at hospital
+              ├── Analytics entry logged  →  Dispatch recorded in dashboard
+              └── Socket.io begins streaming ambulance GPS every 5s
 
 [Hospital Dashboard]
-     └── Receives live alert + preparation checklist
+     ├── Receives live alert + preparation checklist
+     ├── Hears voice announcement (Web Speech API)
+     └── Watches live 🚑 move on map via Socket.io
+
+[Analytics Dashboard]
+     └── Logs response time, hospital, emergency type, outcome
 ```
 
 **MongoDB Collections:**
@@ -216,6 +251,8 @@ hospitals   → { name, location, beds, icuBeds, specializations,
                 availableSpecialists, bedsLastUpdated, status }
 alertLogs   → { alertLogId, hospitalId, emergencyType, eta,
                 patientLocation, webhookStatus, timestamp }
+analytics   → { dispatchId, responseTime, hospitalName,
+                emergencyType, outcome, timestamp }
 ```
 
 ---
@@ -227,11 +264,13 @@ alertLogs   → { alertLogId, hospitalId, emergencyType, eta,
 2. GPS auto-detects patient location    →  Fallback: manual city input
 3. AI engine scores nearby hospitals    →  Distance + Specialist + Beds weighted formula
 4. Best hospital highlighted on map     →  Blinking red marker
-5. Dispatcher clicks Send Alert         →  Alert saved to MongoDB
+5. Dispatcher clicks Send Alert         →  Alert saved to MongoDB + analytics logged
 6. n8n webhook fires automatically      →  Gmail notification to hospital staff
-7. OSRM plots real road route           →  Animated ambulance navigates live
-8. Hospital dashboard updates           →  Preparation checklist displayed
-9. Beds decremented on confirmation     →  Prevents double-booking
+7. Voice alert triggers at hospital     →  Web Speech API announces ETA + emergency
+8. Ambulance GPS streams live           →  Socket.io pushes coords every 5s to hospital map
+9. Hospital map updates smoothly        →  marker.setLatLng() moves 🚑 in real time
+10. Hospital dashboard updates          →  Preparation checklist displayed
+11. Beds decremented on confirmation    →  Prevents double-booking
 ```
 
 ---
@@ -243,6 +282,8 @@ alertLogs   → { alertLogId, hospitalId, emergencyType, eta,
 | AI scoring response time | < 300ms |
 | Real road routing (OSRM) | < 1s |
 | Alert dispatch (webhook) | < 2s end-to-end |
+| Ambulance GPS update interval | Every 5 seconds (Socket.io) |
+| Voice alert trigger delay | < 500ms (Web Speech API) |
 | Hospital data coverage | 1,234+ real hospitals (AP + TN) |
 | Frontend bundle size | < 2MB (Vite optimized) |
 | Edge cases handled | 20 documented scenarios |
@@ -268,6 +309,9 @@ curl -X POST https://emergency-hospital-system.onrender.com/api/recommend \
 curl -X POST https://emergency-hospital-system.onrender.com/api/alert \
   -H "Content-Type: application/json" \
   -d '{"hospitalId": "HOSPITAL_ID", "emergencyType": "Stroke", "eta": 8}'
+
+# Get analytics data
+curl https://emergency-hospital-system.onrender.com/api/analytics
 ```
 
 ---
@@ -281,14 +325,17 @@ emergency-hospital-system/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── EmergencyForm.jsx          # Emergency type selector + GPS
-│   │   │   ├── HospitalMap.jsx            # Interactive Leaflet map
+│   │   │   ├── HospitalMap.jsx            # Leaflet map + live ambulance tracking
 │   │   │   ├── HospitalCard.jsx           # Individual hospital info card
 │   │   │   ├── RecommendationPanel.jsx    # AI best-hospital result
 │   │   │   ├── RouteNavigator.jsx         # Route display component
-│   │   │   └── AlertStatus.jsx            # Alert confirmation status
+│   │   │   ├── AlertStatus.jsx            # Alert confirmation status
+│   │   │   ├── VoiceAlert.jsx             # Web Speech API voice announcer
+│   │   │   ├── AmbulanceTracker.jsx       # Sends navigator.geolocation every 5s
+│   │   │   └── AnalyticsDashboard.jsx     # Dispatch history + charts
 │   │   ├── pages/
 │   │   │   ├── DispatcherDashboard.jsx    # Main dispatcher view
-│   │   │   └── HospitalDashboard.jsx      # Hospital receives alerts
+│   │   │   └── HospitalDashboard.jsx      # Hospital receives alerts + live map
 │   │   ├── services/
 │   │   │   └── api.js                     # Axios API calls
 │   │   └── data/
@@ -299,14 +346,17 @@ emergency-hospital-system/
 │   ├── routes/
 │   │   ├── hospitals.js                   # GET hospital endpoints
 │   │   ├── recommend.js                   # POST AI ranking
-│   │   └── alert.js                       # POST alert + webhook
+│   │   ├── alert.js                       # POST alert + webhook
+│   │   └── analytics.js                   # GET analytics + dispatch logs
 │   ├── controllers/
 │   │   ├── hospitalController.js          # Hospital business logic
 │   │   ├── recommendController.js         # AI scoring logic
-│   │   └── alertController.js            # Alert dispatch logic
+│   │   ├── alertController.js            # Alert dispatch logic
+│   │   └── analyticsController.js         # Analytics aggregation
 │   ├── models/
 │   │   ├── Hospital.js                    # Hospital Mongoose schema
-│   │   └── AlertLog.js                    # Alert log schema
+│   │   ├── AlertLog.js                    # Alert log schema
+│   │   └── Analytics.js                   # Analytics schema
 │   ├── utils/
 │   │   └── scoring.js                     # AI scoring algorithm
 │   └── data/
@@ -325,6 +375,7 @@ emergency-hospital-system/
 - **MongoDB Atlas** — IP whitelist + connection string authentication
 - **Unique alert IDs** — `alertLogId` prevents duplicate dispatch spam
 - **Webhook retry logic** — failed n8n calls are logged and retryable from UI
+- **GPS data** — ambulance coordinates transmitted only over secure Socket.io connection
 
 ---
 
@@ -354,6 +405,25 @@ Returns: Alert confirmation + webhook status
 GET  /api/alert/logs                   →  Recent alert history
 POST /api/alert/:id/retry              →  Retry failed webhook
 ```
+
+### Analytics
+```
+GET  /api/analytics                    →  Full dispatch history
+GET  /api/analytics/summary            →  Response time averages + top hospitals
+GET  /api/analytics/trends             →  Alert volume by hour / day
+```
+
+---
+
+## 🐛 Bug Fixes & Technical Decisions
+
+| Bug | Root Cause | Fix Applied |
+|---|---|---|
+| 🚑 Ambulance appearing at hospital instantly | Route animation was placing 🚑 at destination on load | Removed route animation — ambulance now only moves via Socket.io GPS |
+| Driver GPS not used | `AmbulanceTracker` wasn't sending real coordinates | Now sends `navigator.geolocation` coordinates every 5s via Socket.io |
+| Hospital marker moving with ambulance | Same marker ref used for both ambulance and hospital | Separated into `hospitalMarkerRef` and `ambulanceMarkerRef` |
+| Ambulance marker flickering | Marker was recreated on every GPS update | Replaced with `marker.setLatLng()` for smooth position update |
+| `ambulanceLocation` ignored by map | Dashboard didn't pass live coords down to `HospitalMap` | Added `ambulanceLocation` state + prop threading to `HospitalMap` |
 
 ---
 
@@ -486,7 +556,7 @@ N8N_WEBHOOK_URL=your_n8n_webhook_url
 - [ ] 🛰️ Satellite-view map layer for disaster zone navigation
 - [ ] 🌐 Multi-language support — Telugu, Tamil, Hindi
 - [ ] 🏥 Integration with NHA (National Health Authority) hospital registry
-- [ ] 📊 Admin analytics dashboard for dispatch history & response times
+- [ ] 📊 Advanced analytics — ML-based response time forecasting
 
 ---
 
@@ -532,6 +602,7 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 - [OSRM](http://project-osrm.org/) — Real road routing engine
 - [Overpass API](https://overpass-api.de/) — Real hospital location data
 - [n8n](https://n8n.io/) — Workflow automation & email dispatch
+- [Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API) — Browser-native voice alerts
 - [MongoDB Atlas](https://www.mongodb.com/atlas) — Cloud database
 - [Vercel](https://vercel.com/) & [Render](https://render.com/) — Hosting platforms
 
@@ -544,10 +615,9 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 ⭐ **Star this repo** if this project helped or inspired you!
 
 [![GitHub Stars](https://img.shields.io/github/stars/Manikanta-04/emergency-hospital-system?style=social)](https://github.com/Manikanta-04/emergency-hospital-system)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-Manikanta%20Naripeddi-0077b5?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/manikanta-naripeddi-4326232a5/)
 
 ---
 
 *🚑 Route smarter. Respond faster. Save more lives.*
 
-</div>  
+</div>
