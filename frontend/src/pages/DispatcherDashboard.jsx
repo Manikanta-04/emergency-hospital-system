@@ -5,6 +5,7 @@ import RecommendationPanel from '../components/RecommendationPanel';
 import HospitalCard from '../components/HospitalCard';
 import AlertStatus from '../components/AlertStatus';
 import { getRecommendation, sendAlert, retryAlert } from '../services/api';
+import { getUser, logout } from '../services/authService';
 
 export default function DispatcherDashboard() {
   const [step, setStep] = useState('form');
@@ -16,8 +17,9 @@ export default function DispatcherDashboard() {
   const [showRoute, setShowRoute] = useState(false);
   const [ambulanceLocation, setAmbulanceLocation] = useState(null);
   const [error, setError] = useState('');
-  // ✅ Fix 1: Track user location for map centering
   const [userLocation, setUserLocation] = useState(null);
+
+  const currentUser = getUser();
 
   const handleFormSubmit = async ({ emergencyType, patientCount, lat, lng }) => {
     setLoading(true);
@@ -62,6 +64,7 @@ export default function DispatcherDashboard() {
           patientCount: emergencyData.patientCount,
           wasManualOverride: hospitalId !== recommendation?.hospitalId,
           aiRecommendedHospitalId: recommendation?.hospitalId,
+          dispatcherId: currentUser?.id || 'anonymous',
         });
       }
       const data = res.data;
@@ -101,13 +104,39 @@ export default function DispatcherDashboard() {
             <span className="live-dot" />
             LIVE
           </div>
-          <a href="/analytics" className="reset-btn" style={{ textDecoration: "none" }}>📊 Analytics</a>
-          <a href="/hospital" className="reset-btn" style={{ textDecoration: "none" }}>
-            🏥 Hospital View →
-          </a>
+
+          {/* ✅ Show logged in user */}
+          <div style={{
+            background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)',
+            padding: '5px 12px', borderRadius: '20px',
+            fontSize: '11px', fontFamily: 'monospace', color: '#60a5fa',
+          }}>
+            🚑 {currentUser?.name || 'Dispatcher'}
+          </div>
+
+          <a href="/analytics" className="reset-btn" style={{ textDecoration: 'none' }}>📊 Analytics</a>
+
+          {currentUser?.role === 'admin' && (
+            <a href="/admin" className="reset-btn" style={{ textDecoration: 'none' }}>👑 Admin</a>
+          )}
+
+          <a href="/hospital" className="reset-btn" style={{ textDecoration: 'none' }}>🏥 Hospital View →</a>
+
           {step === 'results' && (
             <button className="reset-btn" onClick={handleReset}>← New Emergency</button>
           )}
+
+          {/* ✅ Logout button */}
+          <button
+            onClick={logout}
+            style={{
+              background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+              color: '#f87171', padding: '7px 12px', borderRadius: '8px',
+              cursor: 'pointer', fontSize: '12px', fontFamily: 'monospace',
+            }}
+          >
+            🚪 Logout
+          </button>
         </div>
       </header>
 
@@ -123,7 +152,6 @@ export default function DispatcherDashboard() {
             />
           </div>
           <div className="form-right">
-            {/* ✅ Fix 1: Pass userLocation to map so it centers correctly */}
             <HospitalMap hospitals={[]} userLocation={userLocation} />
           </div>
         </div>

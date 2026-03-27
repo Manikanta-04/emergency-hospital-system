@@ -6,28 +6,24 @@ const http = require("http");
 const { Server } = require("socket.io");
 
 const app = express();
-const server = http.createServer(app); // ✅ http server for socket.io
+const server = http.createServer(app);
 
 // ─── Socket.io Setup ──────────────────────────────────────────────────────────
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// Store active ambulance locations in memory
 const ambulanceLocations = {};
 
 io.on("connection", (socket) => {
   console.log("🔌 Client connected:", socket.id);
 
-  // ✅ Driver sends their GPS location
   socket.on("ambulance-location", (data) => {
     const { ambulanceId, lat, lng, speed, alertLogId } = data;
     ambulanceLocations[ambulanceId] = { lat, lng, speed, ambulanceId, alertLogId, updatedAt: new Date() };
-    // Broadcast to ALL dispatchers and hospitals watching
     io.emit("ambulance-update", ambulanceLocations[ambulanceId]);
   });
 
-  // ✅ Driver stops tracking
   socket.on("ambulance-stop", (data) => {
     delete ambulanceLocations[data.ambulanceId];
     io.emit("ambulance-stopped", { ambulanceId: data.ambulanceId });
@@ -38,7 +34,6 @@ io.on("connection", (socket) => {
   });
 });
 
-// ✅ Export io so routes can use it
 app.set("io", io);
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -65,8 +60,9 @@ mongoose.connection.on("disconnected", () => console.warn("⚠️ MongoDB discon
 app.use("/api/hospitals", require("./routes/hospitals"));
 app.use("/api/recommend", require("./routes/recommend"));
 app.use("/api/alert", require("./routes/alert"));
+app.use("/api/auth", require("./routes/auth")); // ✅ NEW: Auth routes
 
-// ✅ Ambulance tracking route
+// ─── Ambulance Tracking ───────────────────────────────────────────────────────
 app.get("/api/tracking/:ambulanceId", (req, res) => {
   const loc = ambulanceLocations[req.params.ambulanceId];
   if (!loc) return res.json({ active: false, message: "Ambulance not currently tracking" });
@@ -83,7 +79,7 @@ app.get("/", (req, res) => {
     name: "Emergency Hospital System API",
     status: "running",
     version: "1.0.0",
-    features: ["hospital-routing", "ai-recommendation", "alerts", "live-tracking"],
+    features: ["hospital-routing", "ai-recommendation", "alerts", "live-tracking", "auth"],
   });
 });
 
@@ -111,7 +107,7 @@ function startHeartbeatMonitor() {
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {  // ✅ Use server.listen not app.listen
+server.listen(PORT, () => {
   console.log(`🚀 Emergency Hospital API running on port ${PORT}`);
 });
 
