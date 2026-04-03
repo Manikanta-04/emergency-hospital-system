@@ -1,20 +1,37 @@
+import { useState } from 'react';
 import DispatcherDashboard from './pages/DispatcherDashboard';
 import HospitalDashboard from './pages/HospitalDashboard';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import AmbulanceTracker from './pages/AmbulanceTracker';
 import LoginPage from './pages/LoginPage';
 import AdminPanel from './pages/AdminPanel';
-import { isLoggedIn, getUserRole, logout } from './services/authService';
+import IntroVideo from './components/IntroVideo';
+import { isLoggedIn, getUserRole } from './services/authService';
 import './styles.css';
 
 export default function App() {
   const path = window.location.pathname;
 
-  // ── Public routes (no login needed) ────────────────────────────────────────
+  // ── Public routes — no login, no intro ────────────────────────────────────
   if (path.startsWith('/track/')) return <AmbulanceTracker />;
   if (path === '/login') return <LoginPage />;
 
-  // ── Auth check ──────────────────────────────────────────────────────────────
+  // ── Show intro video only on first visit ──────────────────────────────────
+  const [introShown, setIntroShown] = useState(
+    () => sessionStorage.getItem('introShown') === 'true'
+  );
+
+  const handleIntroFinish = () => {
+    sessionStorage.setItem('introShown', 'true');
+    setIntroShown(true);
+  };
+
+  // Show intro if not yet shown this session
+  if (!introShown) {
+    return <IntroVideo onFinish={handleIntroFinish} />;
+  }
+
+  // ── Auth check ─────────────────────────────────────────────────────────────
   if (!isLoggedIn()) {
     window.location.href = '/login';
     return null;
@@ -22,7 +39,7 @@ export default function App() {
 
   const role = getUserRole();
 
-  // ── Role-based routing ──────────────────────────────────────────────────────
+  // ── Role-based routing ─────────────────────────────────────────────────────
   if (path === '/admin') {
     if (role !== 'admin') { window.location.href = '/'; return null; }
     return <AdminPanel />;
@@ -36,11 +53,9 @@ export default function App() {
     return <HospitalDashboard />;
   }
 
-  if (path === '/analytics') {
-    return <AnalyticsDashboard />;
-  }
+  if (path === '/analytics') return <AnalyticsDashboard />;
 
-  // ── Default: Dispatcher (dispatcher + admin can access) ─────────────────────
+  // ── Default: Dispatcher ────────────────────────────────────────────────────
   if (role === 'hospital') {
     window.location.href = '/hospital';
     return null;
