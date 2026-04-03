@@ -12,11 +12,7 @@ import './styles.css';
 export default function App() {
   const path = window.location.pathname;
 
-  // ── Public routes — no login, no intro ────────────────────────────────────
-  if (path.startsWith('/track/')) return <AmbulanceTracker />;
-  if (path === '/login') return <LoginPage />;
-
-  // ── Show intro video only on first visit ──────────────────────────────────
+  // ── Intro state FIRST (must be before using it) ────────────────────────────
   const [introShown, setIntroShown] = useState(
     () => sessionStorage.getItem('introShown') === 'true'
   );
@@ -26,7 +22,13 @@ export default function App() {
     setIntroShown(true);
   };
 
-  // Show intro if not yet shown this session
+  // ── Public routes — no login, no intro ────────────────────────────────────
+  if (path.startsWith('/track/')) return <AmbulanceTracker />;
+
+  // ✅ FIXED CONDITION (now works correctly)
+  if (path === '/login' && introShown) return <LoginPage />;
+
+  // ── Show intro video only on first visit ──────────────────────────────────
   if (!introShown) {
     return <IntroVideo onFinish={handleIntroFinish} />;
   }

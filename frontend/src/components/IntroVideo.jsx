@@ -47,7 +47,7 @@ export default function IntroVideo({ onFinish }) {
           width: '100%', height: '100%',
           objectFit: 'cover',
         }}
-        muted={false}
+        muted={true}
         playsInline
         preload="auto"
       />
