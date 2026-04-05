@@ -1,16 +1,28 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../services/api';
 
+// ── VAPID Public Key — must match your backend VAPID_PUBLIC_KEY env var ──────
+// Generate with: npx web-push generate-vapid-keys
+// Replace this with your actual public key:
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY ||
+  'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
 // ✅ Voice Alert System
 function speakAlert(alert) {
   if (!window.speechSynthesis) return;
-  window.speechSynthesis.cancel(); // stop any current speech
+  window.speechSynthesis.cancel();
   const text = `Emergency Alert! ${alert.emergencyType} patient arriving at ${alert.hospitalName} in ${alert.eta} minutes. Required unit: ${alert.requiredUnit}. Please prepare immediately.`;
   const msg = new SpeechSynthesisUtterance(text);
-  msg.rate = 0.95;
-  msg.pitch = 1;
-  msg.volume = 1;
-  msg.lang = 'en-IN';
+  msg.rate = 0.95; msg.pitch = 1; msg.volume = 1; msg.lang = 'en-IN';
   window.speechSynthesis.speak(msg);
 }
 
@@ -21,13 +33,80 @@ export default function HospitalDashboard() {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [newAlertFlash, setNewAlertFlash] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+
+  // ── Push notification state ────────────────────────────────────────────────
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushPermission, setPushPermission] = useState('default');
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushStatus, setPushStatus] = useState('');
+
   const prevCountRef = useRef(0);
 
+  // ── Register service worker + check push status on mount ──────────────────
+  useEffect(() => {
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      setPushSupported(true);
+      setPushPermission(Notification.permission);
+
+      navigator.serviceWorker.register('/sw.js').then(async (reg) => {
+        const existing = await reg.pushManager.getSubscription();
+        if (existing) {
+          setPushSubscribed(true);
+          setPushStatus('✅ Push notifications active');
+        }
+      }).catch(console.error);
+    }
+  }, []);
+
+  // ── Subscribe to Web Push ──────────────────────────────────────────────────
+  const subscribeToPush = async () => {
+    try {
+      setPushStatus('Requesting permission...');
+      const permission = await Notification.requestPermission();
+      setPushPermission(permission);
+
+      if (permission !== 'granted') {
+        setPushStatus('❌ Permission denied. Please allow notifications in browser settings.');
+        return;
+      }
+
+      setPushStatus('Registering service worker...');
+      const reg = await navigator.serviceWorker.ready;
+
+      const subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+
+      setPushStatus('Sending subscription to server...');
+      await api.post('/alert/subscribe', { subscription });
+
+      setPushSubscribed(true);
+      setPushStatus('✅ Push notifications enabled! You\'ll get alerts even when this tab is in background.');
+    } catch (err) {
+      console.error('Push subscription failed:', err);
+      setPushStatus(`❌ Failed: ${err.message}`);
+    }
+  };
+
+  const unsubscribeFromPush = async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const subscription = await reg.pushManager.getSubscription();
+      if (subscription) await subscription.unsubscribe();
+      setPushSubscribed(false);
+      setPushStatus('Push notifications disabled');
+    } catch (err) {
+      console.error('Unsubscribe failed:', err);
+    }
+  };
+
+  // ── Fetch alerts (polling every 5s) ───────────────────────────────────────
   useEffect(() => {
     fetchAlerts();
     const interval = setInterval(fetchAlerts, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [voiceEnabled]);
 
   const fetchAlerts = async () => {
     try {
@@ -37,7 +116,6 @@ export default function HospitalDashboard() {
         setNewAlertFlash(true);
         setTimeout(() => setNewAlertFlash(false), 3000);
         setSelectedAlert(newAlerts[0]);
-        // ✅ Voice alert fires automatically
         if (voiceEnabled) speakAlert(newAlerts[0]);
       }
       prevCountRef.current = newAlerts.length;
@@ -86,28 +164,94 @@ export default function HospitalDashboard() {
               {activeAlerts.length} ACTIVE ALERT{activeAlerts.length > 1 ? 'S' : ''}
             </div>
           )}
-          {/* ✅ Voice toggle button */}
+
+          {/* ── Push Notification Toggle ── */}
+          {pushSupported && (
+            <button
+              className="reset-btn"
+              onClick={pushSubscribed ? unsubscribeFromPush : subscribeToPush}
+              style={{
+                background: pushSubscribed ? 'rgba(34,197,94,0.15)' : 'rgba(59,130,246,0.15)',
+                borderColor: pushSubscribed ? '#22c55e' : '#3b82f6',
+                color: pushSubscribed ? '#22c55e' : '#60a5fa',
+              }}
+              title={pushSubscribed ? 'Click to disable push alerts' : 'Click to enable push alerts'}
+            >
+              {pushSubscribed ? '🔔 Push ON' : '🔕 Enable Push'}
+            </button>
+          )}
+
           <button
             className="reset-btn"
             onClick={() => {
               setVoiceEnabled(!voiceEnabled);
               if (voiceEnabled) window.speechSynthesis.cancel();
             }}
-            style={{ background: voiceEnabled ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', borderColor: voiceEnabled ? '#22c55e' : '#ef4444' }}
+            style={{
+              background: voiceEnabled ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+              borderColor: voiceEnabled ? '#22c55e' : '#ef4444',
+            }}
           >
             {voiceEnabled ? '🔊 Voice ON' : '🔇 Voice OFF'}
           </button>
-          {/* ✅ Test voice button */}
+
           <button
             className="reset-btn"
             onClick={() => speakAlert({ emergencyType: 'Stroke', hospitalName: 'Apollo Hospital', eta: 8, requiredUnit: 'Neurology ICU' })}
           >
             🎙️ Test Voice
           </button>
+
           <div className="last-updated">🔄 {getTimeSince(lastUpdated)}</div>
           <a href="/" className="back-btn">← Dispatcher</a>
         </div>
       </header>
+
+      {/* Push status banner */}
+      {pushStatus && (
+        <div style={{
+          background: pushSubscribed ? 'rgba(34,197,94,0.08)' : 'rgba(59,130,246,0.08)',
+          borderBottom: `1px solid ${pushSubscribed ? 'rgba(34,197,94,0.25)' : 'rgba(59,130,246,0.25)'}`,
+          padding: '8px 28px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+          color: pushSubscribed ? '#22c55e' : '#60a5fa',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}>
+          {pushStatus}
+          {!pushSubscribed && !pushStatus.includes('❌') && (
+            <button onClick={subscribeToPush} style={{
+              marginLeft: 'auto',
+              background: 'rgba(59,130,246,0.2)',
+              border: '1px solid rgba(59,130,246,0.4)',
+              color: '#60a5fa',
+              padding: '3px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+            }}>
+              Enable Now →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Push not supported warning */}
+      {!pushSupported && (
+        <div style={{
+          background: 'rgba(245,158,11,0.08)',
+          borderBottom: '1px solid rgba(245,158,11,0.25)',
+          padding: '8px 28px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+          color: '#fbbf24',
+        }}>
+          ⚠️ Push notifications not supported in this browser. Use Chrome or Edge for best experience.
+        </div>
+      )}
 
       {newAlertFlash && (
         <div className="new-alert-banner">🚨 NEW EMERGENCY ALERT INCOMING — PREPARE IMMEDIATELY</div>
@@ -129,9 +273,11 @@ export default function HospitalDashboard() {
                 <div className="alert-section">
                   <div className="section-label urgent">🔴 ACTIVE ({activeAlerts.length})</div>
                   {activeAlerts.map(alert => (
-                    <AlertCard key={alert._id} alert={alert} isSelected={selectedAlert?._id === alert._id}
+                    <AlertCard key={alert._id} alert={alert}
+                      isSelected={selectedAlert?._id === alert._id}
                       onClick={() => { setSelectedAlert(alert); if (voiceEnabled) speakAlert(alert); }}
-                      urgencyColor={getUrgencyColor(alert.emergencyType)} timeSince={getTimeSince(alert.createdAt)} />
+                      urgencyColor={getUrgencyColor(alert.emergencyType)}
+                      timeSince={getTimeSince(alert.createdAt)} />
                   ))}
                 </div>
               )}
@@ -139,9 +285,11 @@ export default function HospitalDashboard() {
                 <div className="alert-section">
                   <div className="section-label completed">✅ COMPLETED ({completedAlerts.length})</div>
                   {completedAlerts.map(alert => (
-                    <AlertCard key={alert._id} alert={alert} isSelected={selectedAlert?._id === alert._id}
+                    <AlertCard key={alert._id} alert={alert}
+                      isSelected={selectedAlert?._id === alert._id}
                       onClick={() => setSelectedAlert(alert)}
-                      urgencyColor={getUrgencyColor(alert.emergencyType)} timeSince={getTimeSince(alert.createdAt)} dimmed />
+                      urgencyColor={getUrgencyColor(alert.emergencyType)}
+                      timeSince={getTimeSince(alert.createdAt)} dimmed />
                   ))}
                 </div>
               )}
@@ -151,8 +299,10 @@ export default function HospitalDashboard() {
 
         <div className="hosp-right">
           {selectedAlert ? (
-            <AlertDetail alert={selectedAlert} urgencyColor={getUrgencyColor(selectedAlert.emergencyType)}
-              timeSince={getTimeSince(selectedAlert.createdAt)} onSpeak={() => speakAlert(selectedAlert)} />
+            <AlertDetail alert={selectedAlert}
+              urgencyColor={getUrgencyColor(selectedAlert.emergencyType)}
+              timeSince={getTimeSince(selectedAlert.createdAt)}
+              onSpeak={() => speakAlert(selectedAlert)} />
           ) : (
             <div className="no-selection">
               <div className="no-sel-icon">👆</div>
@@ -183,7 +333,7 @@ function AlertCard({ alert, isSelected, onClick, urgencyColor, timeSince, dimmed
         <span>🏥 {alert.requiredUnit}</span>
       </div>
       <div className={`alert-webhook ${alert.webhookStatus === 'sent' ? 'sent' : 'failed'}`}>
-        {alert.webhookStatus === 'sent' ? '✅ Notified' : '❌ Notify Failed'}
+        {alert.webhookStatus === 'sent' ? '🔔 Notified' : '❌ Notify Failed'}
       </div>
     </div>
   );
@@ -202,11 +352,10 @@ function AlertDetail({ alert, urgencyColor, timeSince, onSpeak }) {
           <div className="detail-eta" style={{ color: urgencyColor }}>
             {alert.eta}<span style={{ fontSize: 14, opacity: 0.7 }}>min</span>
           </div>
-          {/* ✅ Speak this alert button */}
           <button onClick={onSpeak} style={{
             background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.4)',
             color: '#60a5fa', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer',
-            fontSize: '12px', fontFamily: 'monospace', fontWeight: '700'
+            fontSize: '12px', fontFamily: 'monospace', fontWeight: '700',
           }}>🔊 Read Aloud</button>
         </div>
       </div>
@@ -216,7 +365,7 @@ function AlertDetail({ alert, urgencyColor, timeSince, onSpeak }) {
         <InfoBox icon="👥" label="Patients" value={`${alert.patientCount} patient${alert.patientCount > 1 ? 's' : ''}`} />
         <InfoBox icon="📍" label="Patient Location" value={`${alert.patientLocation?.lat?.toFixed(4)}, ${alert.patientLocation?.lng?.toFixed(4)}`} />
         <InfoBox icon="⏱" label="ETA" value={`${alert.eta} minutes`} highlight={urgencyColor} />
-        <InfoBox icon="🔔" label="Notification" value={alert.webhookStatus === 'sent' ? '✅ Sent' : '❌ Failed'} />
+        <InfoBox icon="🔔" label="Notification" value={alert.webhookStatus === 'sent' ? '🔔 Push Sent' : '❌ Push Failed'} />
         <InfoBox icon="🤖" label="AI Override" value={alert.wasManualOverride ? '⚠️ Manual' : '✅ AI Pick'} />
       </div>
 

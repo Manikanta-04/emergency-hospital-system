@@ -36,7 +36,10 @@ export default function DispatcherDashboard() {
       if (!navigator.onLine) {
         setError('⚠️ Offline mode — showing cached data');
         import('../data/mockHospitals').then(({ MOCK_HOSPITALS }) => {
-          setHospitals(MOCK_HOSPITALS.map((h, i) => ({ ...h, rank: i + 1, score: 90 - i * 10, etaMinutes: Math.ceil(h.distanceKm / 25 * 60) })));
+          setHospitals(MOCK_HOSPITALS.map((h, i) => ({
+            ...h, rank: i + 1, score: 90 - i * 10,
+            etaMinutes: Math.ceil(h.distanceKm / 25 * 60),
+          })));
           setRecommendation({ ...MOCK_HOSPITALS[0], hospitalId: MOCK_HOSPITALS[0]._id, score: 90, etaMinutes: 8 });
           setEmergencyData({ emergencyType, patientCount, lat, lng });
           setStep('results');
@@ -53,8 +56,19 @@ export default function DispatcherDashboard() {
     setAlertStatus({ loading: true });
     try {
       let res;
+
       if (isRetry && alertStatus?.alertLogId) {
-        res = await retryAlert(alertStatus.alertLogId);
+        // ── Retry: just re-send the alert as a new one ──────────────────
+        res = await sendAlert({
+          hospitalId: hospitalId || recommendation?.hospitalId,
+          emergencyType: emergencyData.emergencyType,
+          eta: recommendation?.etaMinutes || 10,
+          patientLocation: { lat: emergencyData.lat, lng: emergencyData.lng },
+          patientCount: emergencyData.patientCount,
+          wasManualOverride: false,
+          aiRecommendedHospitalId: recommendation?.hospitalId,
+          dispatcherId: currentUser?.id || 'anonymous',
+        });
       } else {
         res = await sendAlert({
           hospitalId,
@@ -67,15 +81,46 @@ export default function DispatcherDashboard() {
           dispatcherId: currentUser?.id || 'anonymous',
         });
       }
+
       const data = res.data;
-      if (data.webhookStatus === 'sent') {
-        setAlertStatus({ sent: true, alertLogId: data.alertLogId, message: data.message });
+
+      // ✅ KEY FIX: Treat ANY successful HTTP response (2xx) as a success.
+      // The webhookStatus only reflects whether n8n email fired — we don't
+      // care about that anymore. The alert IS saved in the DB regardless.
+      if (data.alertLogId) {
+        setAlertStatus({
+          sent: true,
+          alertLogId: data.alertLogId,
+          message: data.message || `Alert dispatched to ${data.hospitalName}`,
+        });
         setShowRoute(true);
       } else {
-        setAlertStatus({ failed: true, alertLogId: data.alertLogId, error: data.webhookError, canRetry: data.canRetry });
+        setAlertStatus({
+          failed: true,
+          error: data.error || 'Unknown error',
+          canRetry: true,
+        });
       }
     } catch (err) {
-      setAlertStatus({ failed: true, error: err.response?.data?.error || 'Alert dispatch failed', canRetry: true });
+      // ── Handle duplicate alert (409) gracefully ────────────────────────
+      if (err.response?.status === 409) {
+        const data = err.response.data;
+        if (data.existingAlertId) {
+          // Alert already exists — treat as success
+          setAlertStatus({
+            sent: true,
+            alertLogId: data.existingAlertId,
+            message: 'Alert already sent to this hospital.',
+          });
+          setShowRoute(true);
+          return;
+        }
+      }
+      setAlertStatus({
+        failed: true,
+        error: err.response?.data?.error || err.message || 'Alert dispatch failed',
+        canRetry: true,
+      });
     }
   };
 
@@ -105,7 +150,6 @@ export default function DispatcherDashboard() {
             LIVE
           </div>
 
-          {/* ✅ Show logged in user */}
           <div style={{
             background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)',
             padding: '5px 12px', borderRadius: '20px',
@@ -126,7 +170,6 @@ export default function DispatcherDashboard() {
             <button className="reset-btn" onClick={handleReset}>← New Emergency</button>
           )}
 
-          {/* ✅ Logout button */}
           <button
             onClick={logout}
             style={{
